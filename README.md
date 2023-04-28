@@ -22,5 +22,4 @@ import pandas as pd
 import sqlalchemy as sq
 conn = sq.create_engine("mysql+mysqlconnector://root:root@localhost:3306/sales")
 df = pd.read_sql("customers", conn)
-# df = pd.read_sql("select * from customers", conn)
 df
