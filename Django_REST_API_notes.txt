@@ -1,0 +1,1767 @@
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Django REST API notes <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+REST (Representational State Transfer) is a concept used to develop web APIs which can establish 
+communication between different types of applications.
+
+
+pip install djangorestframework
+
+Add 'rest_framework' in the installed apps.
+
+Serialization: the process of converting complex types (class objects) into python native types (such as python dict)
+
+Deserialization: the process of converting python native types into complex types
+
+
+
+ 		        (Serialization)
+ 
+ Complex type	>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Native type >>>>>>>>>>>>>>>>>>>>>>>> JSON string 
+ 
+ 
+ 		<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+		
+		        (DeSerialization)
+
+
+
+In models.py file:
+
+class Employee(models.Model):
+    name = models.CharField(max_length=20)
+    salary = models.FloatField()
+    address = models.CharField(max_length=50)
+
+    def __str__(self):
+        return self.name
+
+
+
+Create a serializers.py file:
+
+
+from rest_framework import serializers
+
+class EmployeeSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField(max_length=20)
+    salary = serializers.FloatField()
+    address = serializers.CharField(max_length=50)
+
+
+In urls.py file:
+
+urlpatterns = [
+    path('api/', views.EmployeeList, name="emps"),
+    path('api/<int:id>/', views.EmployeeDetail, name="emp"),
+]
+
+
+
+In views.py file:
+
+
+from rest_framework.renderers import JSONRenderer
+
+def EmployeeList(request):
+    emps = Employee.objects.all()
+    serialized_emps = EmployeeSerializer(instance=emps, many=True)		# many=True needs to be used
+    json_string = JSONRenderer().render(serialized_emps.data)
+    return HttpResponse(json_string, content_type = "application/json")
+    # return HttpResponse(json_string)
+
+
+def EmployeeDetail(request, id):
+    emp = Employee.objects.get(id=id)
+    serialized_emp = EmployeeSerializer(instance=emp)		# conversion of complex to native type
+    json_string = JSONRenderer().render(serialized_emp.data)	# conversion of native type to json_string
+    return HttpResponse(json_string, content_type = "application/json")	# to render a json string
+    # return HttpResponse(json_string)				# to render a normal string
+
+
+"serialized_emp.data" needs to be passed to convert into json_string
+
+
+In client.py file:
+
+
+import requests
+
+response = requests.get("http://127.0.0.1:8000/api/")
+print(response)			# returns the response code
+result = response.json()	# returns the data in native type
+print(result)
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>> using JsonResponse instead of HttpResponse <<<<<<<<<<<<<<<<<<<<<
+
+it expects a native type instead of a json string
+
+
+def EmployeeDetail(request, id):
+    emp = Employee.objects.get(id=id)
+    serialized_emp = EmployeeSerializer(instance=emp)
+    return JsonResponse(serialized_emp.data) 
+    
+
+
+def EmployeeList(request):
+    emps = Employee.objects.all()
+    serialized_emps = EmployeeSerializer(instance=emps, many=True)	
+    return JsonResponse(serialized_emps.data, safe=False)	# set safe=False
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>> to render as a password field <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+password = serializers.CharField(style = { "input_type" : "password" })
+
+	==========================================================================================
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Serialization vs Deserialization <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+EmployeeSerializer(instance=emp)	# serialization (expects a complex type)
+
+EmployeeSerializer(data = emp)		# deserialization (expects a native type)
+
+
+
+*** request.POST    (native type)	>>>	 to collect form data 
+*** request.body    (json string) 	>>>	 to collect json string sent to the server
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>> JSONRenderer vs json.dumps and JSONParser vs json.loads <<<<<<<<<<<<<<<<<<<<<
+
+
+Within the web application: 	use JSONRenderer and JSONParser
+
+Client application will use:	dumps and loads
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> CRUD operations <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+*try using POSTMan (pass JSON in "Body" > "raw")
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> GET request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+def EmployeeDetail(request):
+    native_type = JSONParser().parse(io.BytesIO(request.body))
+    id = native_type.get("id", None)
+    if id is not None:
+        emp = Employee.objects.get(id=id)
+        native_type = EmployeeSerializer(instance=emp)
+        json_string = JSONRenderer().render(native_type.data)
+        return HttpResponse(json_string, content_type = "application/json")
+    emps = Employee.objects.all()
+    native_type = EmployeeSerializer(instance=emps, many=True)
+    json_string = JSONRenderer().render(native_type.data)
+    return HttpResponse(json_string, content_type = "application/json")
+    # return HttpResponse(json_string)
+
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> POST request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+In urls.py file:
+
+path('api/create/', views.EmployeeCreate, name="create"),
+
+
+In serializers.py file:
+
+
+class EmployeeSerializer(serializers.Serializer):
+    # id = serializers.IntegerField()
+    name = serializers.CharField(max_length=20)
+    salary = serializers.FloatField()
+    address = serializers.CharField(max_length=50)
+    
+    def create(self, validated_data):
+        return Employee.objects.create(**validated_data)
+
+
+In views.py file:
+
+from django.views.decorators.csrf import csrf_exempt
+
+
+@csrf_exempt
+def EmployeeCreate(request):    
+    if request.method == "POST":
+        native_type = JSONParser().parse(io.BytesIO(request.body))
+        complex_type = EmployeeSerializer(data = native_type)
+        if complex_type.is_valid():
+            complex_type.save()
+            status = {
+                "result" : "Employee Created!"
+            }
+            json_string = JSONRenderer().render(status)
+            return HttpResponse(json_string, content_type="application/json")
+        if complex_type.errors:
+            json_string = JSONRenderer().render(complex_type.errors)
+            return HttpResponse(json_string, content_type="application/json")
+
+
+*** complex_type.is_valid() checks for all the required fields only. Even if, some extra fields are given,
+it will simply ignore those extra fields.
+
+
+In client.py file:
+
+native_type = {
+    "name" : "Vijay",
+    "salary" : 32000,
+    "address" : "Gurugram"
+}
+json_string = json.dumps(native_type)
+response = requests.post("http://127.0.0.1:8000/api/create/", data = json_string)
+print(response)
+print(response.json())
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> json() vs json.loads() function <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+json()    	>>>    to convert json_string response sent from the server 
+json.loads()    >>>    to convert normal json string
+		
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> PUT request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+In urls.py file:
+
+path('api/update/', views.EmployeeUpdate, name="update"),
+
+
+In serializers.py file:
+
+ def update(self, instance, validated_data):
+        instance.name = validated_data.get("name", instance.name)
+        instance.salary = validated_data.get("salary", instance.salary)
+        instance.address = validated_data.get("address", instance.address)
+        instance.save()
+        return instance
+
+
+In views.py file:
+
+@csrf_exempt
+def EmployeeUpdate(request):
+    if request.method == "PUT":
+        native_type = JSONParser().parse(io.BytesIO(request.body))
+        id = native_type.get("id", None)
+        if id is not None:
+            emp = Employee.objects.get(id=id)
+            complex_type = EmployeeSerializer(instance=emp, data=native_type, partial=True)
+            if complex_type.is_valid():
+                complex_type.save()
+                status = {
+                    "result" : "Employee Updated!"
+                }
+                json_string = JSONRenderer().render(status)
+                return HttpResponse(json_string, content_type="application/json")
+            if complex_type.errors:
+                json_string = JSONRenderer().render(complex_type.errors)
+                return HttpResponse(json_string, content_type="application/json")
+        status = {
+                    "result" : "Please provide a valid ID!"
+            }
+        json_string = JSONRenderer().render(status)
+        return HttpResponse(json_string, content_type="application/json")
+
+
+In client.py file:
+
+
+native_type = {
+    "id" : 4,
+    "name" : "Ajay",
+    "salary" : 32000
+}
+json_string = json.dumps(native_type)
+response = requests.put("http://127.0.0.1:8000/api/update/", data = json_string)
+print(response)
+print(response.json())
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> DELETE request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+In urls.py file:
+
+path('api/delete/', views.EmployeeDelete, name="delete"),
+
+
+In views.py file:
+
+
+@csrf_exempt
+def EmployeeDelete(request):
+    if request.method == "DELETE":
+        native_type = JSONParser().parse(io.BytesIO(request.body))
+        id = native_type.get("id", None)
+        if id is not None:
+            emp = Employee.objects.get(id=id)
+            emp.delete()
+            status = {
+                    "result" : "Record Deleted!"
+            }
+            json_string = JSONRenderer().render(status)
+            return HttpResponse(json_string, content_type="application/json")
+        status = {
+                "result" : "Please provide a valid ID!"
+        }
+        json_string = JSONRenderer().render(status)
+        return HttpResponse(json_string, content_type="application/json")
+
+
+
+In client.py file:
+
+
+native_type = {
+    "id" : 4
+}
+json_string = json.dumps(native_type)
+response = requests.delete("http://127.0.0.1:8000/api/delete/", data = json_string)
+print(response)
+print(response.json())
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>> CRUD using a single function <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+In urls.py file:
+
+path('api/', views.EmployeeCRUD, name="emp"),
+
+
+In views.py file:
+
+
+@csrf_exempt
+def EmployeeCRUD(request):
+
+    #>>>>>>>>>>>>>>>>>>>>> GET request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    if request.method == "GET":
+        native_type = JSONParser().parse(io.BytesIO(request.body))
+        id = native_type.get("id", None)
+        if id is not None:
+            emp = Employee.objects.get(id=id)
+            native_type = EmployeeSerializer(instance=emp)
+            json_string = JSONRenderer().render(native_type.data)
+            return HttpResponse(json_string, content_type = "application/json")
+        emps = Employee.objects.all()
+        native_type = EmployeeSerializer(instance=emps, many=True)
+        json_string = JSONRenderer().render(native_type.data)
+        return HttpResponse(json_string, content_type = "application/json")
+        # return HttpResponse(json_string)
+
+
+    #>>>>>>>>>>>>>>>>>>>>>> POST request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    elif request.method == "POST":
+        native_type = JSONParser().parse(io.BytesIO(request.body))
+        complex_type = EmployeeSerializer(data=native_type)
+        if complex_type.is_valid():
+            complex_type.save()
+            status = {
+                "result" : "Employee Created!"
+            }
+            json_string = JSONRenderer().render(status)
+            return HttpResponse(json_string, content_type="application/json")
+        if complex_type.errors:
+            json_string = JSONRenderer().render(complex_type.errors)
+            return HttpResponse(json_string, content_type="application/json")
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>> PUT request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    elif request.method == "PUT":
+        native_type = JSONParser().parse(io.BytesIO(request.body))
+        id = native_type.get("id", None)
+        if id is not None:
+            emp = Employee.objects.get(id=id)
+            complex_type = EmployeeSerializer(instance=emp, data=native_type, partial=True)
+            if complex_type.is_valid():
+                complex_type.save()
+                status = {
+                    "result" : "Employee Updated!"
+                }
+                json_string = JSONRenderer().render(status)
+                return HttpResponse(json_string, content_type="application/json")
+            if complex_type.errors:
+                json_string = JSONRenderer().render(complex_type.errors)
+                return HttpResponse(json_string, content_type="application/json")
+        status = {
+                    "result" : "Please provide a valid ID!"
+            }
+        json_string = JSONRenderer().render(status)
+        return HttpResponse(json_string, content_type="application/json")
+
+
+    #>>>>>>>>>>>>>>>>>>>>>> DELETE request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    elif request.method == "DELETE":
+        native_type = JSONParser().parse(io.BytesIO(request.body))
+        id = native_type.get("id", None)
+        if id is not None:
+            emp = Employee.objects.get(id=id)
+            emp.delete()
+            status = {
+                    "result" : "Record Deleted!"
+            }
+            json_string = JSONRenderer().render(status)
+            return HttpResponse(json_string, content_type="application/json")
+        status = {
+                "result" : "Please provide a valid ID!"
+        }
+        json_string = JSONRenderer().render(status)
+        return HttpResponse(json_string, content_type="application/json")
+
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> using a Class Based View <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+In urls.py file:
+
+path('api/', views.EmployeeCBV.as_view(), name="emp"),
+
+
+In views.py file:
+
+
+from django.utils.decorators import method_decorator
+from django.views import View
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class EmployeeCBV(View):
+
+    # >>>>>>>>>>>>>>>>>>>> GET request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    def get(self, request, *args, **kwargs):
+        native_type = JSONParser().parse(io.BytesIO(request.body))
+        id = native_type.get("id", None)
+        if id is not None:
+            emp = Employee.objects.get(id=id)
+            native_type = EmployeeSerializer(instance=emp)
+            json_string = JSONRenderer().render(native_type.data)
+            return HttpResponse(json_string, content_type = "application/json")
+        emps = Employee.objects.all()
+        native_type = EmployeeSerializer(instance=emps, many=True)
+        json_string = JSONRenderer().render(native_type.data)
+        return HttpResponse(json_string, content_type = "application/json")
+        # return HttpResponse(json_string)
+
+    
+    # >>>>>>>>>>>>>>>>>>>>>>>>>> POST request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    def post(self, request, *args, **kwargs):
+        native_type = JSONParser().parse(io.BytesIO(request.body))
+        complex_type = EmployeeSerializer(data=native_type)
+        if complex_type.is_valid():
+            complex_type.save()
+            status = {
+                "result" : "Employee Created!"
+            }
+            json_string = JSONRenderer().render(status)
+            return HttpResponse(json_string, content_type="application/json")
+        if complex_type.errors:
+            json_string = JSONRenderer().render(complex_type.errors)
+            return HttpResponse(json_string, content_type="application/json")
+
+
+    # >>>>>>>>>>>>>>>>>>> PUT request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    def put(self, request, *args, **kwargs):
+        native_type = JSONParser().parse(io.BytesIO(request.body))
+        id = native_type.get("id", None)
+        if id is not None:
+            emp = Employee.objects.get(id=id)
+            complex_type = EmployeeSerializer(instance=emp, data=native_type, partial=True)
+            if complex_type.is_valid():
+                complex_type.save()
+                status = {
+                    "result" : "Employee Updated!"
+                }
+                json_string = JSONRenderer().render(status)
+                return HttpResponse(json_string, content_type="application/json")
+            if complex_type.errors:
+                json_string = JSONRenderer().render(complex_type.errors)
+                return HttpResponse(json_string, content_type="application/json")
+        status = {
+                    "result" : "Please provide a valid ID!"
+            }
+        json_string = JSONRenderer().render(status)
+        return HttpResponse(json_string, content_type="application/json")
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>>> DELETE request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    def delete(self, request, *args, **kwargs):
+        native_type = JSONParser().parse(io.BytesIO(request.body))
+        id = native_type.get("id", None)
+        if id is not None:
+            emp = Employee.objects.get(id=id)
+            emp.delete()
+            status = {
+                    "result" : "Record Deleted!"
+            }
+            json_string = JSONRenderer().render(status)
+            return HttpResponse(json_string, content_type="application/json")
+        status = {
+                "result" : "Please provide a valid ID!"
+        }
+        json_string = JSONRenderer().render(status)
+        return HttpResponse(json_string, content_type="application/json")
+
+
+
+In case of "PUT", "instance=<<object_name>>" needs to be passed else it will do the insertion.
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> setting validations <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+Order of execution of validation checks:
+
+1. Custom validators
+2. Field level
+3. Object level
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>> field level <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+In serializers.py file:
+
+
+    def validate_salary(self, value):
+        if value < 10000:
+            raise serializers.ValidationError("Salary must be greater than 10000")
+        return value
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>> object level <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+    def validate(self, data):
+        name = data.get("name")
+        salary = data.get("salary")
+        address = data.get("address")
+        if salary < 5000:
+            raise serializers.ValidationError("Salary must be greater than 5000")
+        elif len(name) < 6:
+            raise serializers.ValidationError("Name must have atleast 6 characters")
+        return data
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>>> custom validators <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+def starts_with_R(value):
+    if value[0].lower() != "r":
+        raise serializers.ValidationError("Name must start with R")
+
+
+class EmployeeSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=20, validators=[starts_with_R])
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> ModelSerializers <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+No need to type in the fields in the serializer class explicitly.
+No need to implement create and update methods in the serializer class explicitly.
+
+
+class EmployeeSerializer(serializers.ModelSerializer):
+   class Meta:
+       model = Employee
+       fields = "__all__"
+
+
+*** Adding field and object level validators are exactly the same in ModelSerializers.
+
+
+	>>>>>>>>>>>>>>>>>>>>> adding custom validators <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+class EmployeeSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(validators=[starts_with_R])
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> APIView <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+In urls.py file:
+
+path('api/', views.EmployeeAPIViewFunction, name="emp"),
+
+
+"Response" object expects a native type 
+
+"request.data" will have already parsed data (in native type format) from the client so no need to use
+JSONRenderer or JSONParser methods now
+
+So, we will use "request.data" from now instead of "request.body"
+
+
+In views.py file:
+
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+
+
+
+@api_view(["GET", "POST", "PUT", "DELETE"])
+def EmployeeAPIViewFunction(request):
+
+
+    # >>>>>>>>>>>>>>>>>>>>>> GET request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    if request.method == "GET":
+        id = request.data.get("id", None)
+        if id is not None:
+            try:
+                emp = Employee.objects.get(id=id)
+            except:
+                emp = None
+            if emp is not None:
+                native_type = EmployeeSerializer(instance=emp)
+                return Response(native_type.data)
+            else:
+                return Response({
+                    "status" : "Employee not found!"
+                })
+        emps = Employee.objects.all()
+        native_types = EmployeeSerializer(instance=emps, many=True)
+        return Response(native_types.data)
+
+
+    # >>>>>>>>>>>>>>>>>>>>> POST request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    elif request.method == "POST":
+        complex_type = EmployeeSerializer(data=request.data)
+        if complex_type.is_valid():
+            complex_type.save()
+            return Response({
+                "msg" : "Record Created"
+            })
+        return Response(complex_type.errors)
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>> PUT request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    elif request.method == "PUT":
+        id = request.data.get("id", None)
+        if id is not None:
+            try:
+                emp = Employee.objects.get(id=id)
+            except:
+                emp = None
+            if emp is not None:
+                complex_type = EmployeeSerializer(instance=emp, data=request.data, partial=True)
+                if complex_type.is_valid():
+                    complex_type.save()
+                    return Response({
+                        "msg" : "Record Updated"
+                    })
+            return Response({
+                "error" : "Employee not found!"
+            })
+        return Response({
+            "error" : "Please provide a valid ID!"
+        })
+
+
+   # >>>>>>>>>>>>>>>>>>>>>>> DELETE request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    elif request.method == "DELETE":
+        id = request.data.get("id", None)
+        if id is not None:
+            try:
+                emp = Employee.objects.get(id=id)
+            except:
+                emp = None
+            if emp is not None:
+                emp.delete()
+                return Response({
+                        "msg" : "Record Deleted!"
+                    })               
+            return Response({
+                        "msg" : "Employee not found!"
+                    }) 
+        return Response({
+                        "msg" : "Please provide a valid ID!"
+                    })
+    
+
+
+In client.py file:
+
+headers = {
+    "content-Type" : "application/json"
+}
+response = requests.post("http://127.0.0.1:8000/api/", data = json_string, headers=headers)
+
+
+*In POSTMan, type should be changed from "Text" to "JSON" so as to get the results
+
+
+creating an APIView gives us the access of browsable APIs and we can test the APIs on the browser as well
+
+
+
+
+# >>>>>>>>>>>>>>>>>>>>>>>>>>> Class Based API View <<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+from rest_framework.views import APIView
+from rest_framework import status
+
+
+class EmployeeAPIViewCBV(APIView):
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>> GET request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    def get(self, request, format=None):
+        id = request.data.get("id", None)
+        if id is not None:
+            try:
+                emp = Employee.objects.get(id=id)
+            except:
+                emp = None
+            if emp is not None:
+                native_type = EmployeeSerializer(instance=emp)
+                return Response(native_type.data)
+            else:
+                return Response({
+                    "status" : "Employee not found!"
+                }, status=status.HTTP_404_NOT_FOUND)
+        emps = Employee.objects.all()
+        native_types = EmployeeSerializer(instance=emps, many=True)
+        return Response(native_types.data)
+        
+
+    # >>>>>>>>>>>>>>>>>>>>>>> POST request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    def post(self, request, format=None):
+        complex_type = EmployeeSerializer(data=request.data)
+        if complex_type.is_valid():
+            complex_type.save()
+            return Response({
+                "msg" : "Record Created"
+            })
+        return Response(complex_type.errors)
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>> PUT request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    def put(self, request, format=None):
+        id = request.data.get("id", None)
+        if id is not None:
+            try:
+                emp = Employee.objects.get(id=id)
+            except:
+                emp = None
+            if emp is not None:
+                complex_type = EmployeeSerializer(instance=emp, data=request.data, partial=True)
+                if complex_type.is_valid():
+                    complex_type.save()
+                    return Response({
+                        "msg" : "Record Updated"
+                    })
+            return Response({
+                "error" : "Employee not found!"
+            }, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "error" : "Please provide a valid ID!"
+        }, status=status.HTTP_404_NOT_FOUND)
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>> DELETE request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    def delete(self, request, format=None):
+        id = request.data.get("id", None)
+        if id is not None:
+            try:
+                emp = Employee.objects.get(id=id)
+            except:
+                emp = None
+            if emp is not None:
+                emp.delete()
+                return Response({
+                        "msg" : "Record Deleted!"
+                    })               
+            return Response({
+                        "msg" : "Employee not found!"
+                    }, status=status.HTTP_404_NOT_FOUND) 
+        return Response({
+                        "msg" : "Please provide a valid ID!"
+                    }, status=status.HTTP_404_NOT_FOUND)
+    
+
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Generic API Views <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+In urls.py file:
+
+
+path('api/', views.Employee_List_Create_ModelMixin.as_view(), name="all_create"),
+path('api/<int:pk>/', views.Employee_Retrieve_Update_Destroy_ModelMixin.as_view(), name="get_update_delete"),
+   
+
+
+In views.py file:
+
+
+from rest_framework.generics import GenericAPIView
+from rest_framework.mixins import (ListModelMixin, CreateModelMixin,
+                                   RetrieveModelMixin, UpdateModelMixin,
+                                   DestroyModelMixin)
+
+
+
+    # >>>>>>>>>>>>>>>>> GET all and POST request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+class Employee_List_Create_ModelMixin(GenericAPIView, ListModelMixin, CreateModelMixin):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+
+    def get(self, request, *args, **kwargs):
+        return self.list(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        return self.create(request, *args, **kwargs)
+
+
+
+    # >>>>>>>>>>>>>>>>> GET one, PUT, DELETE request <<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+class Employee_Retrieve_Update_Destroy_ModelMixin(GenericAPIView, RetrieveModelMixin, UpdateModelMixin, DestroyModelMixin):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+
+
+    def get(self, request, *args, **kwargs):
+        return self.retrieve(request, *args, **kwargs)
+
+    def put(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    def delete(self, request, *args, **kwargs):
+        return self.destroy(request, *args, **kwargs)
+
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Concrete Views <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+These have built-in implementations of CRUD operations.
+
+
+In urls.py file:
+
+path('api/', views.EmployeeListCreateAPIView.as_view(), name="list_create"),
+path('api/<int:pk>/', views.EmployeeRetrieveUpdateDestroyAPIView.as_view(), name="get_update_delete"),
+
+
+
+from rest_framework.generics import (RetrieveAPIView, ListAPIView, CreateAPIView, UpdateAPIView,
+                                     DestroyAPIView, ListCreateAPIView, RetrieveUpdateDestroyAPIView)
+
+
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>>> GET single record <<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+class EmployeeRetrieveAPIView(RetrieveAPIView):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>>> GET all records <<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+class EmployeeListAPIView(ListAPIView):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>>> POST request <<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+class EmployeeCreateAPIView(CreateAPIView):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>>> PUT request <<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+class EmployeeUpdateAPIView(UpdateAPIView):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>>> DELETE request <<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+class EmployeeDestroyAPIView(DestroyAPIView):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+
+
+
+
+However, we do have some classes which are capable of doing multiple operations at the same time.
+Eg. 
+
+ListCreateAPIView		:	to perform list and create operations
+RetrieveUpdateDestroyAPIView 	: 	to perform retrieve, update, delete operations
+
+
+These two are enough to perfom CRUD operations.
+
+
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>>> GET all and POST requests <<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+class EmployeeListCreateAPIView(ListCreateAPIView):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>>> GET single, PUT, DELETE requests <<<<<<<<<<<<<<
+
+class EmployeeRetrieveUpdateDestroyAPIView(RetrieveUpdateDestroyAPIView):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> ViewSet <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+In this, we just need to use a DefaultRouter class instance which will manage the urls by its own.
+
+
+In urls.py file:
+
+
+from rest_framework.routers import DefaultRouter
+
+
+router = DefaultRouter()
+router.register("api", views.EmployeeViewSet, basename="emp")
+
+
+    path('', include(router.urls)),
+
+
+
+
+In views.py file:
+
+from rest_framework import viewsets
+
+
+class EmployeeViewSet(viewsets.ViewSet):
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>> GET all records <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    def list(self, request):
+        emps = Employee.objects.all()
+        native_types = EmployeeSerializer(instance=emps, many=True)
+        return Response(native_types.data)
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>> GET single record <<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    def retrieve(self, request, pk=None):
+        id = pk
+        if id is not None:
+            try:
+                emp = Employee.objects.get(id=id)
+            except:
+                emp = None
+            if emp is not None:
+                native_type = EmployeeSerializer(instance=emp)
+                return Response(native_type.data)
+            else:
+                return Response({
+                    "status" : "Employee not found!"
+                }, status=status.HTTP_404_NOT_FOUND)
+        emps = Employee.objects.all()
+        native_types = EmployeeSerializer(instance=emps, many=True)
+        return Response(native_types.data)
+        
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>> POST request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    def create(self, request):
+        complex_type = EmployeeSerializer(data=request.data)
+        if complex_type.is_valid():
+            complex_type.save()
+            return Response({
+                "msg" : "Record Created"
+            })
+        return Response(complex_type.errors)
+
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>> PUT request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    def update(self, request, pk):
+        id = pk
+        if id is not None:
+            try:
+                emp = Employee.objects.get(id=id)
+            except:
+                emp = None
+            if emp is not None:
+                complex_type = EmployeeSerializer(instance=emp, data=request.data)
+                if complex_type.is_valid():
+                    complex_type.save()
+                    return Response({
+                        "msg" : "Record Updated"
+                    })
+            return Response({
+                "error" : "Employee not found!"
+            }, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "error" : "Please provide a valid ID!"
+        }, status=status.HTTP_404_NOT_FOUND)
+
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>> Partial Update request <<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    def partial_update(self, request, pk):
+        id = pk
+        if id is not None:
+            try:
+                emp = Employee.objects.get(id=id)
+            except:
+                emp = None
+            if emp is not None:
+                complex_type = EmployeeSerializer(instance=emp, data=request.data, partial=True)
+                if complex_type.is_valid():
+                    complex_type.save()
+                    return Response({
+                        "msg" : "Record Updated"
+                    })
+            return Response({
+                "error" : "Employee not found!"
+            }, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            "error" : "Please provide a valid ID!"
+        }, status=status.HTTP_404_NOT_FOUND)
+
+
+
+    # >>>>>>>>>>>>>>>>>>>>>>> DELETE request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    def destroy(self, request, pk):
+        id = pk
+        if id is not None:
+            try:
+                emp = Employee.objects.get(id=id)
+            except:
+                emp = None
+            if emp is not None:
+                emp.delete()
+                return Response({
+                        "msg" : "Record Deleted!"
+                    })               
+            return Response({
+                        "msg" : "Employee not found!"
+                    }, status=status.HTTP_404_NOT_FOUND) 
+        return Response({
+                        "msg" : "Please provide a valid ID!"
+                    }, status=status.HTTP_404_NOT_FOUND)
+    
+
+
+
+
+
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> ModelViewSets <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+It has already implemented logic of CRUD operations.
+
+
+In urls.py file:
+
+from rest_framework.routers import DefaultRouter
+
+
+router = DefaultRouter()
+router.register("api", views.EmployeeModelViewSet, basename="emp")
+
+
+    path('', include(router.urls)),
+
+
+
+In views.py file:
+
+
+class EmployeeModelViewSet(viewsets.ModelViewSet):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>> creating ReadOnly ModelViewSets <<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+class EmployeeModelViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+
+
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> API authentication <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+It means allowing only authenticated users to access APIs
+
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Permissions <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+1. AllowAny			:	anyone
+2. IsAuthenticated 		:  	just a registered user
+3. IsAdminUser			:	a user having IsStaff=True
+4. IsAuthenticatedOrReadOnly 	:	registered user has full access but ReadOnly access to anonymous user
+5. DjangoModelPermissions	: 	permission to be set from admin panel for a particular user 
+					on a particular model class
+6. DjangoModelPermissionsOrAnonReadOnly  : DjangoModelPermissions to registered users and ReadOnly 
+					   permission to Anonymous users
+
+
+In views.py file:
+
+from rest_framework.authentication import BasicAuthentication
+from rest_framework.permissions import IsAuthenticated
+
+
+class EmployeeModelViewSet(viewsets.ModelViewSet):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+
+    authentication_classes = [BasicAuthentication]
+    permission_classes = [IsAuthenticated]
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> allowing at global level for all the classes <<<<<<<<<<<<<<<<<<<<<<<
+
+
+In settings.py file:
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES" : ["rest_framework.authentication.BasicAuthentication"],
+    "DEFAULT_PERMISSION_CLASSES" : ["rest_framework.permissions.IsAuthenticated"],
+}
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> removing the security from a particular API <<<<<<<<<<<<<<<<<<<<<<<<
+
+
+In views.py file:
+
+
+class EmployeeModelViewSet(viewsets.ModelViewSet):
+    permission_classes = [AllowAny]
+
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> SessionAuthentication <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+To enable it:
+
+
+In urls.py file:
+
+path('auth/', include("rest_framework.urls")),
+
+
+In views.py file:
+
+from rest_framework.authentication import SessionAuthentication
+
+
+class EmployeeModelViewSet(viewsets.ModelViewSet):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+    authentication_classes = [SessionAuthentication]	# this way
+    permission_classes = [IsAdminUser]
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>> custom permissions <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+In custom_permissions.py file:
+
+
+from rest_framework.permissions import BasePermission
+
+class CustomPermission(BasePermission):
+    def has_permission(self, request, view):
+        if request.method == "POST":
+            return True
+        return False
+
+
+In views.py file:
+
+from .custom_permissions import CustomPermission
+
+
+class EmployeeModelViewSet(viewsets.ModelViewSet):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [CustomPermission]		# this way
+
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> setting authentication in function based views <<<<<<<<<<<<<<<<<<<<<<<
+
+
+from rest_framework.decorators import authentication_classes, permission_classes
+
+@authentication_classes([BasicAuthentication])
+@permission_classes([IsAuthenticated])
+def EmployeeDetail(request):
+    pass
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Token Based Authentication <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+In settings.py file, add following in installed apps:
+
+
+'rest_framework.authtoken',
+
+
+In views.py file:
+
+from rest_framework.authentication import TokenAuthentication
+
+
+Run migrate command:
+
+>>> python manage.py migrate
+
+
+
+	>>>>>>>>>>>>>>>>>>>>>> ways to generate token for users <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+1. From admin panel, generate a token for a user
+
+2. python manage.py drf_create_token <<user_name>>
+
+	it returns the previously generated token else creates a new one
+
+3. users can generate tokens for themselves. If their supplied username and password are correct, they
+will receive their previously generated token else a new token will be generated and returned to them
+
+	Step a) In urls.py file:  
+	
+		from rest_framework.authtoken.views import obtain_auth_token
+
+		path('gettoken/', obtain_auth_token),
+			
+	Step b) >>> pip install httpie
+
+	Step c) >>> http POST http://127.0.0.1:8000/gettoken/ username=roshaa password=admin
+		It will return the token
+	
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>> generating token as soon as a user is created <<<<<<<<<<<<<<<<<<<
+					(using a signal)
+
+In models.py file:
+ 
+
+from django.conf import settings
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from rest_framework.authtoken.models import Token
+
+
+@receiver(post_save, sender=settings.AUTH_USER_MODEL)
+def create_auth_token(sender, instance=None, created=False, **kwargs):
+    if created:
+        Token.objects.create(user=instance)
+
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> authentication using token <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+If the user with this token is having authorization to access the data, the response will be sent by 
+the server
+
+
+
+GET request:
+
+http http://127.0.0.1:8000/api/ "Authorization:Token 38bb06363798b71326af86baef3a5292dbe82f70"
+
+
+
+POST request:
+
+http -f POST http://127.0.0.1:8000/api/ name=Command salary=34567 address=Ladakh "Authorization:Token 38bb06363798b71326af86baef3a5292dbe82f70"
+
+
+
+PUT request:
+
+http PUT http://127.0.0.1:8000/api/32/ name=Commando salary=54567 address=Ladakh "Authorization:Token 38bb06363798b71326af86baef3a5292dbe82f70"
+
+
+
+
+DELETE request:
+
+http DELETE http://127.0.0.1:8000/api/32/ "Authorization:Token 38bb06363798b71326af86baef3a5292dbe82f70"
+
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> JWT Authorization <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+Its a third party tool which doesn't store any tokens in the database
+
+
+pip install djangorestframework-simplejwt
+
+
+In urls.py file:
+
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView, TokenVerifyView
+
+
+    path('gettoken/', TokenObtainPairView.as_view(), name="get"),
+    path('refreshtoken/', TokenRefreshView.as_view(), name="refresh"),
+    path('verifytoken/', TokenVerifyView.as_view(), name="verify"),
+
+
+
+>>> python manage.py migrate
+
+
+
+POST request:
+
+http POST http://127.0.0.1:8000/gettoken/ username="admin" password="admin@123"
+
+
+It will return an authorization (default validity = 5 minutes) and a refresh token (default validity = 1 day)
+
+Something like this:
+
+{
+    "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNjI1MDI4NzAwLCJqdGkiOiIwMDlmZmY3ZDRiZTc0YzFmYWUxYWFjMjc2ZDE2ZjQxMCIsInVzZXJfaWQiOjV9.SCSh7v9diVqiu1u3y1xlY7rVy298Taqh17zHy7dpEAo",
+    "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0b2tlbl90eXBlIjoicmVmcmVzaCIsImV4cCI6MTYyNTExNDgwMCwianRpIjoiNGQ5NGFmZGJmOTA3NDIyMzg1ZDg1OGFiNWU4OGY4OGQiLCJ1c2VyX2lkIjo1fQ.fdLBt0iAMdEHNvhZxGG4kIt1JPkkkzft1malwHOwbJA"
+}
+
+
+"refresh" token helps in generating a new "access" token (within validity period) without having to send
+the username and password once again
+
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>>>>> verifying the token <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+http POST http://127.0.0.1:8000/verifytoken/ token="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNjI1MDI4NzAwLCJqdGkiOiIwMDlmZmY3ZDRiZTc0YzFmYWUxYWFjMjc2ZDE2ZjQxMCIsInVzZXJfaWQiOjV9.SCSh7v9diVqiu1u3y1xlY7rVy298Taqh17zHy7dpEAo"
+
+
+200 OK response is received in case its a valid token otherwise 401 unauthorized response
+
+
+
+	>>>>>>>>>>>>>>>>>> getting a new access token by using refresh <<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+http POST http://127.0.0.1:8000/refreshtoken/ refresh="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0b2tlbl90eXBlIjoicmVmcmVzaCIsImV4cCI6MTYyNTExNDgwMCwianRpIjoiNGQ5NGFmZGJmOTA3NDIyMzg1ZDg1OGFiNWU4OGY4OGQiLCJ1c2VyX2lkIjo1fQ.fdLBt0iAMdEHNvhZxGG4kIt1JPkkkzft1malwHOwbJA"
+
+
+It will give a new access token something like this:
+
+{
+    "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNjI1MDI5MjQ0LCJqdGkiOiI3MDMzYjFhZGMzOTM0MjRjODEyNjk4ZGM2YTQ5NDExYSIsInVzZXJfaWQiOjV9.vcyaHEbL6i6tkL5GiULKIcxmGLZAGfWtdSn3zBtUdjw"
+}
+
+
+
+
+	>>>>>>>>>>>>>>>>>>>> applying JWT authentication <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+In views.py file:
+
+from rest_framework_simplejwt.authentication import JWTAuthentication
+
+
+
+class EmployeeModelViewSet(viewsets.ModelViewSet):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+    authentication_classes = [JWTAuthentication]	# this way
+    permission_classes = [IsAuthenticated]
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>> sending request <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+Pattern: http http://127.0.0.1:8000/api/ "Authorization:Bearer <<token>>"
+
+
+
+GET request:
+
+http http://127.0.0.1:8000/api/ "Authorization:Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNjI1MDMwMTc4LCJqdGkiOiIzMTAzOTY2ODc4MjI0OWNkODg2OTUzODIwYjBjZTgwNSIsInVzZXJfaWQiOjV9.aCAQOxG9EMWhhKJNHwuL1dI_EdbYY1EbAhJhgnOhZdY"
+
+
+POST request:
+
+http -f POST http://127.0.0.1:8000/api/ name=JWTToken salary=134567 address=Dehradun "Authorization:Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNjI1MDMwNTE1LCJqdGkiOiI3MDc3MGU5YjVmNTI0ZmY3OGJmNTg2MmEwN2JkMzJlNiIsInVzZXJfaWQiOjV9.kG6iZBgBlAosCMbRt-J7Afy1V2Z2ryD29L0Qw-6oOXE"
+
+
+PUT request:
+
+http PUT http://127.0.0.1:8000/api/33/ name=JWTToken salary=134567 address=Bengaluru "Authorization:Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNjI1MDMwNTE1LCJqdGkiOiI3MDc3MGU5YjVmNTI0ZmY3OGJmNTg2MmEwN2JkMzJlNiIsInVzZXJfaWQiOjV9.kG6iZBgBlAosCMbRt-J7Afy1V2Z2ryD29L0Qw-6oOXE"
+
+
+DELETE request:
+
+http DELETE http://127.0.0.1:8000/api/33/ "Authorization:Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNjI1MDMwNTE1LCJqdGkiOiI3MDc3MGU5YjVmNTI0ZmY3OGJmNTg2MmEwN2JkMzJlNiIsInVzZXJfaWQiOjV9.kG6iZBgBlAosCMbRt-J7Afy1V2Z2ryD29L0Qw-6oOXE"
+
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>>> increasing expiry time of the token <<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+In settings.py file:
+
+from datetime import timedelta
+
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME" : timedelta(minutes=10),
+    "REFRESH_TOKEN_LIFETIME" : timedelta(days=3),
+    "ROTATE_REFRESH_TOKENS" : True       	# upon refresh, a refresh token will also be received
+}
+
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> throttling <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+It manages the API requests a user can make.
+
+
+In urls.py file:
+
+    path('auth/', include("rest_framework.urls")),	# to use Session Authentication
+
+
+>>> python manage.py makemigrations
+>>> python manage.py migrate
+
+
+
+In views.py file:
+
+from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
+
+
+class EmployeeModelViewSet(viewsets.ModelViewSet):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    throttle_classes = [AnonRateThrottle, UserRateThrottle]	# this way
+
+
+In settings.py file:
+
+
+REST_FRAMEWORK = {
+    "DEFAULT_THROTTLE_RATES" : {
+        "anon" : "2/day",
+        "user" : "5/hour",
+    }
+}
+
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>>>> setting different throttling times <<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+In throttling.py file:
+
+
+from rest_framework.throttling import UserRateThrottle
+
+class BasicUserRateThrottle(UserRateThrottle):
+    scope = "basic"
+
+
+use "scope" attribute's value to set the throttling rate
+
+
+
+In settings.py file:
+
+
+REST_FRAMEWORK = {
+    "DEFAULT_THROTTLE_RATES" : {
+        "anon" : "2/day",
+        "user" : "5/hour",
+        "basic" : "3/minute",		# this way
+    }
+}
+
+
+In views.py file:
+
+from .throttling import BasicUserRateThrottle
+
+
+
+class EmployeeModelViewSet(viewsets.ModelViewSet):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    throttle_classes = [AnonRateThrottle, BasicUserRateThrottle]	# this way
+
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> ScopedRateThrottle <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+A portion of an API can also be throttled. Eg. only create operation.
+
+
+In views.py file:
+
+from rest_framework.throttling import ScopedRateThrottle
+
+
+class EmployeeCreateAPIView(CreateAPIView):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+    throttle_classes = [ScopedRateThrottle]	# this way
+    throttle_scope = ["emp_create"]		# use this in settings.py file
+
+
+
+In settings.py file:
+
+
+REST_FRAMEWORK = {
+    "DEFAULT_THROTTLE_RATES" : {
+        "anon" : "2/day",
+        "user" : "5/hour",
+        "basic" : "3/minute",
+        "emp_create" : "1/day",			# this way
+    }
+}
+
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> django filters in REST API <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+pip install django-filter
+
+
+In settings.py file, add in app:
+
+
+'django_filters',
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>> setting globally <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+REST_FRAMEWORK = {
+
+    "DEFAULT_FILTER_BACKENDS" : ["django_filters.rest_framework.DjangoFilterBackend"]
+
+}
+
+
+In views.py file, add the fields you want to see in the page:
+
+
+class EmployeeModelViewSet(viewsets.ModelViewSet):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    throttle_classes = [AnonRateThrottle, BasicUserRateThrottle]
+    filter_fields = ["name", "salary"]					# this way
+
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>> setting locally <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+In views.py file:
+
+from django_filters.rest_framework import DjangoFilterBackend
+
+
+class EmployeeModelViewSet(viewsets.ModelViewSet):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    throttle_classes = [AnonRateThrottle, BasicUserRateThrottle]
+
+    filter_fields = ["name", "salary"]				# this way
+    filter_backends = [DjangoFilterBackend]			# this way
+
+
+
+Another way to give a request when filters exist:
+
+http://127.0.0.1:8000/api/?name=ram&salary=22500
+
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> search filter <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+from rest_framework.filters import SearchFilter
+
+
+class EmployeeModelViewSet(viewsets.ModelViewSet):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    throttle_classes = [AnonRateThrottle, BasicUserRateThrottle]
+
+    search_fields = ["name", "salary"]			# this way
+    filter_backends = [SearchFilter]			# this way
+
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> ordering filter <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+from rest_framework.filters import OrderingFilter
+
+
+
+class EmployeeModelViewSet(viewsets.ModelViewSet):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    throttle_classes = [AnonRateThrottle, BasicUserRateThrottle]
+
+    ordering_fields = ["salary"]		# this way
+    filter_backends = [OrderingFilter]		# this way
+
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> Pagination <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+	>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> setting globally <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+
+REST_FRAMEWORK = {
+
+    "DEFAULT_PAGINATION_CLASS" : "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE" : 3
+
+}
+
+
+	>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> setting locally <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+In paginations.py file:
+
+
+from rest_framework.pagination import PageNumberPagination
+
+class CustomPageNumberPagination(PageNumberPagination):
+    page_size = 5
+    max_page_size = 10
+
+
+In views.py file:
+
+from .paginations import CustomPageNumberPagination
+
+
+
+class EmployeeModelViewSet(viewsets.ModelViewSet):
+    queryset = Employee.objects.all()
+    serializer_class = EmployeeSerializer
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticatedOrReadOnly]
+    throttle_classes = [AnonRateThrottle, BasicUserRateThrottle]
+
+    pagination_class = CustomPageNumberPagination			# this way
+
+
+
+
+===================================================================================================
+
+
+Best practices:
+
+1. Use ModelSerializers instead of Serializers
+2. Use ModelViewSets instead of Concrete APIViews
+
+
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> End <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
